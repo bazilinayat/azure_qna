@@ -1,0 +1,35 @@
+[project]
+name = "azure-qna"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "fastembed>=0.8.0",
+    "gitpython>=3.1.57",
+    "lxml>=6.1.1",
+    "markdownify>=1.2.3",
+    "onnxruntime>=1.28.0",
+    "openai>=2.49.0",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "qdrant-client>=1.18.0",
+    "requests>=2.34.2",
+    "sentence-transformers>=5.6.1",
+    "sqlalchemy>=2.0.51",
+    "streamlit>=1.60.0",
+    "tiktoken>=0.13.0",
+    "tqdm>=4.70.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The repo root must be importable so `app.*` resolves without installation.
+pythonpath = ["."]
+addopts = "-q"

@@ -216,3 +216,29 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --------------------------------------------------
+# AzureMentor: generated data (never commit)
+# --------------------------------------------------
+
+# Cloned upstream documentation repositories (several GB, each with its own .git)
+data/source/
+
+# Intermediate + derived artifacts
+data/raw/
+data/processed/
+
+# SQLite database and its journals
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# Qdrant on-disk storage
+qdrant_data/
+
+# Pipeline run logs
+logs/
+
+# Local exploration scripts, not part of the deliverable
+scratch/
