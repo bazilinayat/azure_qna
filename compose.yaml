@@ -7,7 +7,7 @@ services:
     ports:
       # REST API
       - "6333:6333"
-      # gRPC API — markedly faster for bulk upserts, see QDRANT_PREFER_GRPC
+      # gRPC API -- markedly faster for bulk upserts, see QDRANT_PREFER_GRPC
       - "6334:6334"
 
     volumes:
@@ -21,6 +21,38 @@ services:
       timeout: 5s
       retries: 5
 
+  app:
+    build: .
+    container_name: azurementor-app
+
+    ports:
+      - "8501:8501"
+
+    env_file:
+      - .env
+
+    environment:
+      # Inside the compose network Qdrant is reachable by service name, which
+      # overrides whatever localhost value .env has for running on the host.
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_GRPC_PORT: 6334
+
+    volumes:
+      # The index and the monitoring database. Mounted rather than baked in so
+      # rebuilding the index does not mean rebuilding the image.
+      - ./data:/app/data
+
+    depends_on:
+      qdrant:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+    # Only started with `--profile app`, so `docker compose up -d` still brings
+    # up just the dependencies for local development against the host Python.
+    profiles: ["app"]
+
   grafana:
     image: grafana/grafana-oss:latest
     container_name: azurementor-grafana
@@ -28,8 +60,29 @@ services:
     ports:
       - "3000:3000"
 
+    environment:
+      # SQLite is not a built-in Grafana datasource. The SYNC variant blocks
+      # startup until the plugin is installed; the plain GF_PLUGINS_PREINSTALL
+      # installs in the background and datasource provisioning then races it.
+      # (GF_INSTALL_PLUGINS, which most tutorials still use, is deprecated in
+      # Grafana 13.)
+      GF_PLUGINS_PREINSTALL_SYNC: frser-sqlite-datasource
+
+      # Dashboards are read-only to anonymous visitors, which is what makes the
+      # monitoring shareable without handing out the admin password.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+
     volumes:
       - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+
+      # Read-write on purpose. SQLite in WAL mode needs to write the -shm index
+      # file even for readers, so a :ro mount makes queries fail.
+      - ./data:/var/lib/azurementor
 
     restart: unless-stopped
 

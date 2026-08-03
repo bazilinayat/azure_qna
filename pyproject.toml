@@ -12,14 +12,20 @@ dependencies = [
     "markdownify>=1.2.3",
     "onnxruntime>=1.28.0",
     "openai>=2.49.0",
+    "python-docx>=1.2.0",
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3",
     "qdrant-client>=1.18.0",
+    "reportlab>=5.0.0",
     "requests>=2.34.2",
     "sentence-transformers>=5.6.1",
     "sqlalchemy>=2.0.51",
     "streamlit>=1.60.0",
     "tiktoken>=0.13.0",
+    # Declared explicitly even though sentence-transformers already pulls it in:
+    # [tool.uv.sources] only applies to direct dependencies, and the CPU-only
+    # override below is what keeps 5 GB of CUDA out of the Linux image.
+    "torch>=2.0",
     "tqdm>=4.70.0",
 ]
 
@@ -33,3 +39,20 @@ testpaths = ["tests"]
 # The repo root must be importable so `app.*` resolves without installation.
 pythonpath = ["."]
 addopts = "-q"
+
+# --------------------------------------------------
+# CPU-only torch on Linux
+# --------------------------------------------------
+# The default PyPI torch wheel for Linux bundles CUDA: 43 nvidia-* packages plus
+# triton, roughly 5 GB installed. None of it is usable in the container, which
+# has no GPU, and unpacking it is what made `docker compose build` die after 23
+# minutes. Windows already resolves to a CPU build, so the override is scoped to
+# Linux and local development is unaffected.
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]

@@ -59,6 +59,8 @@ class EmbeddingIndexer:
         started = time.perf_counter()
 
         try:
+            self.repository.ensure_available()
+
             self.repository.create_collection(
                 self.embedder.dimension,
                 force=self.rebuild,

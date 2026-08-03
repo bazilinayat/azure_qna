@@ -4,10 +4,10 @@ A retrieval-augmented mentor for learning Microsoft Azure. Ask it a question in
 plain English and it answers from the official Azure documentation, with links
 back to the pages it used.
 
-> **Status: retrieval pipeline complete, answer generation not yet built.**
-> Ingestion, chunking, hybrid search and the pipeline runner work end to end.
-> The LLM layer, web interface, evaluation and monitoring are the next steps —
-> see [Roadmap](#roadmap).
+> **Status: complete end to end.** Ingestion, chunking, hybrid search, answer
+> generation, evaluation, the web interface and monitoring all work. Remaining:
+> the agentic layer, Grafana dashboard panels, and a public deployment — see
+> [Roadmap](#roadmap).
 
 ## The problem
 
@@ -86,6 +86,45 @@ Or run a single query non-interactively:
 ```bash
 uv run python -m app.search.main "how do I restrict blob access to a vnet"
 ```
+
+## Asking questions
+
+`app.search.main` returns raw chunks. To get an actual answer, use the LLM layer
+(requires `OPENAI_API_KEY` in `.env`):
+
+```bash
+uv run python -m app.llm.main "how do I stop a blob container being publicly readable"
+```
+
+Every answer cites its sources inline as `[1]`, `[2]`, and only the sources the
+model actually cited are listed underneath — retrieval always returns its top-k,
+so printing all of them would imply they were all used. Each answer also reports
+its retrieval time, generation time, token counts and cost.
+
+Three things worth knowing:
+
+**It refuses rather than guesses.** If retrieval returns nothing, the model is
+never called at all — answering with no context is precisely the confident,
+uncited guess this project exists to avoid. If retrieval returns only irrelevant
+chunks, the prompt instructs the model to say the documentation does not cover
+it.
+
+**Prompts are versioned.** `app/llm/prompts.py` holds three variants —
+`grounded_mentor` (default), `concise` and `strict_extractive` — so the LLM
+evaluation has something to compare:
+
+```bash
+uv run python -m app.llm.main --prompt concise "what are the blob access tiers"
+```
+
+**Cost is reported honestly or not at all.** Prices cannot be read from the API,
+so `LLM_PRICING` in `app/config.py` is a hard-coded table. A model that is not in
+it reports its token counts normally but leaves cost as unknown rather than
+inventing a number. Fill it in with `LLM_PRICE_INPUT_PER_1M` and
+`LLM_PRICE_OUTPUT_PER_1M` in `.env`.
+
+Note that the first question in a session takes ~20 seconds because the embedding
+and reranker models load on first use. Subsequent questions retrieve in ~1.7s.
 
 ## The pipeline runner
 
@@ -211,6 +250,137 @@ routes every chunk size to the same store, which silently turns a comparison
 between two sizes into a comparison of one size against itself. The pipeline
 warns if you have.
 
+## The web app
+
+```bash
+docker compose --profile app up -d --build
+```
+
+Then open <http://localhost:8501>. To run it against your host Python instead:
+
+> **Two things make this build work, and it fails badly without either.**
+>
+> `.dockerignore` — the repo directory is ~3.3 GB once the index, Qdrant storage
+> and `.venv` are in it, and Docker uploads the whole thing as build context
+> otherwise. With it, the context is 0.6 MB.
+>
+> CPU-only torch — the default PyPI torch wheel for Linux bundles CUDA: 43
+> `nvidia-*` packages plus triton, around 5 GB installed, none of it usable in a
+> container with no GPU. `[tool.uv.sources]` in `pyproject.toml` pins Linux to
+> the PyTorch CPU index. Windows resolution is untouched. Note that this only
+> works because `torch` is declared as a direct dependency — uv source overrides
+> do not apply to transitive ones.
+>
+> Together those two accounted for roughly 8 GB of pointless I/O, which was
+> enough to kill the buildkit daemon partway through unpacking.
+
+```bash
+uv run streamlit run app/ui/streamlit_app.py
+```
+
+**Chat history is session-only.** It lives in Streamlit's session state and dies
+with the browser tab. The app says so in a banner rather than leaving people to
+find out — anyone who assumes otherwise loses work. The sidebar exports the
+conversation as Word or PDF, generated in memory and never written to disk.
+
+What *is* kept is the monitoring record for each answer: question, answer,
+latency, tokens, cost, the judge's relevance verdict and any thumbs up/down. That
+distinction is stated in the UI, not buried here.
+
+## Evaluation
+
+```bash
+uv run python -m app.eval.main generate --sample 150
+```
+
+Ground truth cannot be hand-written at useful scale, so the LLM reads an indexed
+document and writes questions it answers. The source document is the correct
+answer by construction, which is what makes hit rate and MRR computable. Uses the
+API.
+
+```bash
+uv run python -m app.eval.main retrieval
+```
+
+Sweeps six retrieval configurations — keyword only, vector only, hybrid, and each
+with expansion and reranking — reporting hit rate, MRR, hit@1, hit@3 and latency.
+No API calls, so this is free to re-run after any retrieval change.
+
+```bash
+uv run python -m app.eval.main answers --sample 30
+```
+
+Answers the same questions with each prompt template and scores them with the
+LLM-as-judge. Reports relevance breakdown plus a *grounding rate* — how often the
+expected document was actually retrieved. That second number is what tells you
+where a bad score comes from: high grounding with low relevance is a prompt
+problem, low grounding is a retrieval problem and no prompt will fix it.
+
+```bash
+uv run python -m app.eval.main live
+```
+
+The same judge that scores the offline set also scores every live answer, so
+offline and production numbers are directly comparable. Results land in
+`eval_results/` as timestamped CSVs.
+
+**A caveat on synthetic ground truth:** questions generated from a document tend
+to echo its vocabulary, which flatters keyword search. The generation prompt
+pushes against this, but the bias cannot be removed. Treat absolute numbers as
+soft and comparisons between configurations as sound.
+
+## Monitoring
+
+Every answered question is logged to `data/monitoring.db` — deliberately a
+separate database from the index, since the index is dropped and rebuilt by
+`--fresh` and conversation history must survive that.
+
+Grafana reads it directly via the SQLite datasource plugin, provisioned
+automatically. See **[grafana/README.md](grafana/README.md)** for the schema and
+ready-to-paste queries.
+
+```bash
+docker compose up -d grafana
+```
+
+<http://localhost:3000> — anonymous read-only, `admin`/`admin` to edit.
+
+## Deploying publicly
+
+Measured footprint: **1.4 GB** Qdrant storage, **432 MB** index database, ~250 MB
+of models in the image. That ~2 GB is what rules options in or out.
+
+**A small VPS is the realistic choice.** Hetzner CX22 or a DigitalOcean basic
+droplet, roughly $5-7/month, comfortably fits everything:
+
+```bash
+git clone <your-repo> && cd azure_qna
+```
+
+```bash
+docker compose --profile app up -d --build
+```
+
+Copy `data/` and `qdrant_data/` up with `rsync` rather than rebuilding the index
+on the server — an hour of CPU on a small VPS is slower and costs more than the
+transfer. Put Caddy or nginx in front for TLS, and **do not expose port 6333**:
+Qdrant has no authentication by default.
+
+**Free tiers are awkward but possible.** Streamlit Community Cloud caps at 1 GB
+RAM and cannot host Qdrant; you would pair it with Qdrant Cloud's free 1 GB
+cluster and still need the SQLite index, which exceeds GitHub's 100 MB file limit
+without LFS. Hugging Face Spaces with the Docker SDK is the better free option —
+2 vCPU and 16 GB RAM — but its disk is ephemeral, so the index has to be baked
+into the image or restored on boot.
+
+**If you want the index smaller,** most of those 432 MB is `documents.content`,
+the full article text, which serving does not need — only `chunks` and the FTS
+index are read at query time. A serving-only copy with that column dropped should
+land near 80 MB, which changes what is deployable. Not built yet.
+
+Whatever you pick, set `OPENAI_API_KEY` as a platform secret, never in the image,
+and put a spend limit on the API key before the URL is public.
+
 ## Known gaps
 
 **Corpus coverage.** Microsoft split the old monolithic `azure-docs` repository:
@@ -226,16 +396,17 @@ full rebuild. Content-hash-based upsert would fix this.
 
 Ordered by dependency — the LLM layer gates everything below it.
 
-- [ ] **LLM layer** (`app/llm/`) — answer generation over retrieved chunks
-- [ ] **Agentic RAG** — let the agent decide whether to search, refine, or answer
-- [ ] **Retrieval evaluation** — ground-truth set, hit rate and MRR, comparing
+- [x] **LLM layer** (`app/llm/`) — answer generation over retrieved chunks
+- [x] **Retrieval evaluation** — ground-truth set, hit rate and MRR, comparing
       keyword vs vector vs hybrid vs hybrid+rerank
-- [ ] **LLM evaluation** — LLM-as-judge over multiple prompt variants
-- [ ] **Streamlit interface** with thumbs-up/down feedback capture
-- [ ] **Monitoring** — persist conversations, feedback, latency, token cost;
-      Grafana dashboard
-- [ ] **Full containerization** — application in docker-compose, not just
+- [x] **LLM evaluation** — LLM-as-judge over multiple prompt variants
+- [x] **Streamlit interface** with thumbs-up/down feedback capture
+- [x] **Monitoring** — persist conversations, feedback, latency, token cost;
+      Grafana over SQLite
+- [x] **Full containerization** — application in docker-compose, not just
       dependencies
+- [ ] **Agentic RAG** — let the agent decide whether to search, refine, or answer
+- [ ] **Grafana dashboard** — panels built on the queries in grafana/README.md
 - [ ] **Cloud deployment**
 
 ## Project layout
@@ -259,6 +430,11 @@ app/
     embedder.py        torch and fastembed backends
     qdrant_client.py   collection lifecycle, bulk load tuning, search
     index.py           resumable embed-and-upsert
+  llm/
+    client.py          OpenAI wrapper with token, cost and latency capture
+    prompts.py         versioned prompt templates
+    rag.py             retrieve -> build context -> generate
+    main.py            ask questions from the CLI
   search/
     hybrid_search.py   orchestration
     keyword_search.py  BM25 over FTS5

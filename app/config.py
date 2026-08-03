@@ -279,4 +279,85 @@ RERANKER_MODEL = os.getenv(
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+LLM_MODEL = _env_str("LLM_MODEL", "gpt-5.4-mini")
+
+# Low but not zero: answers should be near-deterministic for evaluation, and
+# temperature is one of the things the LLM evaluation will sweep.
+LLM_TEMPERATURE = float(_env_str("LLM_TEMPERATURE", "0.2"))
+
+# gpt-5.x counts reasoning tokens inside completion tokens, so this ceiling has
+# to leave room for both the reasoning and the visible answer.
+LLM_MAX_OUTPUT_TOKENS = _env_int("LLM_MAX_OUTPUT_TOKENS", 1200)
+
+LLM_TIMEOUT_SECONDS = float(_env_str("LLM_TIMEOUT_SECONDS", "60"))
+
+# Which prompt template to use. See app/llm/prompts.py for the alternatives;
+# this is the knob the LLM evaluation sweeps.
+LLM_PROMPT = _env_str("LLM_PROMPT", "grounded_mentor")
+
+# Retrieved chunks passed to the model as context.
+LLM_CONTEXT_CHUNKS = _env_int("LLM_CONTEXT_CHUNKS", 5)
+
+# --------------------------------------------------
+# LLM pricing (USD per 1,000,000 tokens)
+# --------------------------------------------------
+#
+# Used to report cost per answer, which the monitoring dashboard needs. Prices
+# are NOT fetchable from the API, so they are hard-coded and go stale.
+#
+# Only rates that could be verified are listed. An unlisted model reports its
+# token counts normally but leaves cost as None rather than inventing a number —
+# a wrong cost figure on a dashboard is worse than an absent one. To fill one in,
+# check https://openai.com/api/pricing and either add it here or set
+# LLM_PRICE_INPUT_PER_1M / LLM_PRICE_OUTPUT_PER_1M in .env.
+
+LLM_PRICING: dict[str, tuple[float, float]] = {
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4.1-mini": (0.40, 1.60),
+}
+
+_price_in = _env_str("LLM_PRICE_INPUT_PER_1M", "")
+_price_out = _env_str("LLM_PRICE_OUTPUT_PER_1M", "")
+
+if _price_in and _price_out:
+    LLM_PRICING[LLM_MODEL] = (float(_price_in), float(_price_out))
+
+# --------------------------------------------------
+# Monitoring
+# --------------------------------------------------
+#
+# Deliberately a SEPARATE database from the index. The index is rebuilt by
+# `--fresh` and is namespaced per chunk profile; conversation history and user
+# feedback must survive both. Losing months of feedback to a reindex would be
+# an unforced error.
+
+MONITORING_DATABASE_PATH = Path(
+    _env_str("MONITORING_DATABASE_PATH", str(DATA_DIR / "monitoring.db"))
+)
+
+MONITORING_DATABASE_URL = f"sqlite:///{MONITORING_DATABASE_PATH}"
+
+# Log every answered question. Turning this off also disables the dashboard.
+MONITORING_ENABLED = _env_bool("MONITORING_ENABLED", True)
+
+# --------------------------------------------------
+# Evaluation
+# --------------------------------------------------
+
+# Model used by the LLM-as-judge. Kept separate from LLM_MODEL so the judge can
+# stay fixed while the answering model is swept, which is the only way the
+# comparison between answering models means anything.
+JUDGE_MODEL = _env_str("JUDGE_MODEL", LLM_MODEL)
+
+# Judge every live answer as it is produced. This roughly doubles the number of
+# API calls per question, so it is a real cost decision, not a free feature.
+JUDGE_LIVE_ANSWERS = _env_bool("JUDGE_LIVE_ANSWERS", True)
+
+# Where generated ground truth lands.
+GROUND_TRUTH_PATH = Path(
+    _env_str("GROUND_TRUTH_PATH", str(DATA_DIR / "ground_truth.csv"))
+)
+
+EVAL_RESULTS_DIR = Path(
+    _env_str("EVAL_RESULTS_DIR", str(BASE_DIR / "eval_results"))
+)

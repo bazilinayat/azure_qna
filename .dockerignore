@@ -1,0 +1,41 @@
+# Everything here would otherwise be uploaded to the Docker daemon as build
+# context. Without this file the context is ~3.3 GB (a 1.3 GB .venv, 1.4 GB of
+# Qdrant storage and 681 MB of index), none of which belongs in the image --
+# the index and vectors are mounted at runtime instead.
+
+# Virtualenv: Linux wheels are installed inside the image, so a Windows venv is
+# both useless and enormous.
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Runtime data, all volume-mounted by compose.
+data/
+qdrant_data/
+logs/
+eval_results/
+
+# Local scratch and secrets.
+scratch/
+.env
+*.db
+*.db-wal
+*.db-shm
+
+# Version control and editor state.
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+
+# Docs and tests are not needed to run the app.
+tests/
+grafana/
+README.md
+*.md
+!pyproject.toml

@@ -1,0 +1,20 @@
+# Provisions the monitoring database as a Grafana datasource on startup, so the
+# dashboard has something to query without any manual setup.
+#
+# Requires the frser-sqlite-datasource plugin, installed by GF_PLUGINS_PREINSTALL_SYNC
+# in compose.yaml. The SYNC variant blocks Grafana's startup until the plugin is
+# present -- the non-sync version installs in the background, and provisioning
+# can then race it and fail with "datasource type not found".
+
+apiVersion: 1
+
+datasources:
+  - name: AzureMentor
+    type: frser-sqlite-datasource
+    uid: azurementor-sqlite
+    access: proxy
+    isDefault: true
+    jsonData:
+      # Path inside the Grafana container. compose mounts ./data here.
+      path: /var/lib/azurementor/monitoring.db
+    editable: true

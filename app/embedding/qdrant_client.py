@@ -44,6 +44,23 @@ class QdrantRepository:
     # Collection lifecycle
     # ---------------------------------------------------------
 
+    def ensure_available(self) -> None:
+        """Fail early and legibly when Qdrant is not reachable.
+
+        Without this, a stopped container surfaces as a thirty-line gRPC
+        traceback that says nothing about the actual problem or the fix.
+        """
+
+        try:
+            self.client.get_collections()
+
+        except Exception as exc:
+            raise RuntimeError(
+                f"Cannot reach Qdrant at {QDRANT_HOST}:{QDRANT_PORT}. "
+                f"Start it with:  docker compose up -d\n"
+                f"({type(exc).__name__}: {str(exc).splitlines()[0][:120]})"
+            ) from exc
+
     def collection_exists(self) -> bool:
         return self.client.collection_exists(self.collection)
 

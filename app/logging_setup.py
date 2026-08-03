@@ -37,6 +37,16 @@ def setup_logging(
     if _configured:
         return None
 
+    # The Windows console defaults to cp1252, which cannot encode the curly
+    # quotes and dashes that LLM answers are full of. Without this, "Here's"
+    # prints as "Here?s" and long answers can raise UnicodeEncodeError outright.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
+
     root = logging.getLogger()
     root.setLevel(min(console_level, file_level))
 

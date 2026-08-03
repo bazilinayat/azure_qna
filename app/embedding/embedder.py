@@ -58,7 +58,12 @@ class TorchEmbedder:
         self.model = SentenceTransformer(EMBEDDING_MODEL, device="cpu")
         self.model.max_seq_length = EMBEDDING_MAX_TOKENS
 
-        self._dimension = self.model.get_sentence_embedding_dimension()
+        # Renamed in newer sentence-transformers; the old name still works but
+        # emits a FutureWarning on every startup.
+        if hasattr(self.model, "get_embedding_dimension"):
+            self._dimension = self.model.get_embedding_dimension()
+        else:
+            self._dimension = self.model.get_sentence_embedding_dimension()
 
         log.info("Embedding model ready (dim=%s)", self._dimension)
 
