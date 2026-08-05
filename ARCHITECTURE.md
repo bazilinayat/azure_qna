@@ -10,10 +10,13 @@ what the project is and how to run it.
 
 ![AzureMentor architecture](assets/architecture.png)
 
-Regenerate with `uv run python assets/make_architecture.py` after editing
-`assets/make_architecture.py`.
+And the same thing as a pipeline, with the module that implements each step
+named on the box:
 
-The same structure, as an editable diagram:
+![The build, query and observability pipeline](assets/pipeline.png)
+
+<details>
+<summary>The same diagram in Mermaid, if you would rather edit text than pixels</summary>
 
 ```mermaid
 flowchart TB
@@ -70,6 +73,8 @@ flowchart TB
     ANS --> UI
 ```
 
+</details>
+
 Two things to notice.
 
 **Build time and query time are completely separate.** The pipeline writes SQLite
@@ -85,6 +90,11 @@ history has to survive that.
 ---
 
 ## What happens when you ask a question
+
+![The per-request sequence](assets/request-flow.png)
+
+<details>
+<summary>The same sequence in Mermaid</summary>
 
 ```mermaid
 sequenceDiagram
@@ -118,6 +128,8 @@ sequenceDiagram
     S->>M: log tokens, cost, latency, relevance
     U->>M: thumbs up / down
 ```
+
+</details>
 
 The ordering matters in two places. The judge runs **after** the answer is on
 screen, so the user never waits on a call made for our benefit. And if retrieval
@@ -298,6 +310,23 @@ are **not** indexed. Add them via `SOURCE_REPOS`.
 **Cost scales with two switches.** `JUDGE_LIVE_ANSWERS=true` doubles API calls
 per question, and `LLM_CONTEXT_CHUNKS` sets how many chunks ride along in every
 prompt — the dominant input-token cost.
+
+---
+
+## Regenerating the diagrams
+
+All three images are drawn by scripts in `assets/`, sharing the toolkit in
+`assets/sketch.py`. Edit the content near the bottom of each and re-run:
+
+```bash
+uv run python assets/make_architecture.py
+uv run python assets/make_pipeline.py
+uv run python assets/make_request_flow.py
+```
+
+They are PNGs rather than SVGs on purpose: the fonts are baked in, so they render
+identically on GitHub and anywhere else, without the viewer needing a handwriting
+font installed.
 
 ---
 

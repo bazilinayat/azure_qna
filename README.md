@@ -88,7 +88,7 @@ retrieval 1.7s  generation 4.3s  |  2282 in + 324 out tokens
 ![AzureMentor architecture](assets/architecture.png)
 
 <details>
-<summary>Same thing as a diagram you can edit (Mermaid)</summary>
+<summary>Same thing as a diagram (Mermaid)</summary>
 
 ```mermaid
 flowchart LR
@@ -422,36 +422,6 @@ inconsistency.
 
 ---
 
-## Design decisions worth knowing
-
-Full detail in [ARCHITECTURE.md](ARCHITECTURE.md); the short version:
-
-**Chunking is measured in the embedding model's tokens, not tiktoken.**
-`bge-small-en-v1.5` truncates at 512 tokens and its WordPiece tokenizer emits
-~1.27× more tokens than `cl100k_base` on Azure docs. Chunking to "512 tiktoken
-tokens" produces ~650-token chunks whose tails the encoder silently discards —
-no error, no warning. Chunks are budgeted at 480 real tokens with a final pass
-that guarantees nothing exceeds it.
-
-**Chunks follow document structure and carry their breadcrumb.** Splitting on
-markdown headers keeps code blocks, tables and procedures intact, and every chunk
-is prefixed with its header path, which grounds the embedding and gives BM25 the
-service names to match on.
-
-**Retrieval is hybrid, fused with RRF.** BM25 catches exact resource names and
-CLI flags that embeddings blur; vectors catch paraphrase. RRF combines rankings
-without needing to normalise BM25 against cosine.
-
-**The embedding backend is torch, not fastembed** — measured 4× faster here
-(8.3 vs 2.2 chunks/s), because fastembed ships an int8-quantized ONNX build that
-is slower than fp32 on this CPU.
-
-**Indexing is resumable and self-healing.** Each chunk records `backend:model`
-after its upsert succeeds, so an interrupted run continues and a model change
-re-embeds automatically rather than leaving two incompatible vector spaces mixed.
-
----
-
 ## Project structure
 
 ```
@@ -469,8 +439,6 @@ app/
 tests/                 76 tests, no network
 grafana/               datasource provisioning + query cookbook
 ```
-
-~6,800 lines of Python.
 
 ---
 
