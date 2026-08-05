@@ -488,6 +488,111 @@ pull newer documentation.
 
 ---
 
+## Contributing
+
+Fork it, break it, send it back better. Issues and pull requests are both
+welcome, and so is a comment telling me a measurement here is wrong.
+
+### Getting set up
+
+```bash
+git clone https://github.com/<your-username>/azure_qna.git && cd azure_qna
+```
+
+```bash
+uv sync && cp .env.example .env
+```
+
+Put your own `OPENAI_API_KEY` in `.env`, then start the infrastructure:
+
+```bash
+docker compose up -d
+```
+
+**Do not build the full index while developing.** An hour is a long feedback
+loop. Build a slice instead — about three minutes, and every feature works:
+
+```bash
+INGEST_CATEGORIES=storage uv run python -m app.pipeline --fresh --limit 100
+```
+
+On Windows PowerShell, set `$env:INGEST_CATEGORIES="storage"` first, then run the
+command without the prefix.
+
+Most work needs no API key at all. Retrieval, chunking, the FTS index and the
+whole test suite run offline; only answer generation, the judge and ground-truth
+generation call OpenAI.
+
+### Before you open a PR
+
+```bash
+uv run pytest
+```
+
+76 tests, no network calls, a few seconds. They must pass.
+
+If you touched anything under `app/ingest/` or `app/search/`, **re-run the
+retrieval evaluation and put the numbers in the PR**:
+
+```bash
+uv run python -m app.eval.main retrieval
+```
+
+It costs no API calls, and it is the difference between "this feels better" and
+"this is better". Several changes in this repo were reverted because the numbers
+disagreed with the intuition — that is the norm here, not a failure.
+
+If you changed SQL in `grafana/`, check it actually runs against the datasource
+rather than only reading correctly. Untested SQL in those docs has bitten this
+project once already.
+
+### Things worth working on
+
+Concrete gaps, roughly easiest first:
+
+- **Fix the acronym false positive.** `asp` matches inside `ASP.NET`, so
+  "deploy an ASP.NET Core app" expands to "App Service plan.NET Core". See
+  `app/search/query_expander.py`. The list also contains acronyms for services
+  that are not in the index.
+- **Add the missing documentation repos.** Virtual machines, AKS, Key Vault,
+  Cosmos DB, Monitor and Entra ID live in separate repositories now and are not
+  indexed. `SOURCE_REPOS` in `app/config.py` is a list for exactly this.
+- **A serving-only index.** Most of the 432 MB database is `documents.content`,
+  which query time never reads. Stripping it should land near 80 MB and change
+  what is deployable.
+- **Incremental ingestion.** Re-running clears and reloads, which reassigns chunk
+  ids and forces a full re-embed. Content-hash upsert would fix it.
+- **Parent-document retrieval.** Embed small chunks for sharp matching, then
+  expand each hit to its surrounding section before generation. The schema
+  already supports it — `document_id`, `chunk_index` and `header_path` are all
+  there.
+- **LLM-based query rewriting**, to replace the hand-written acronym dictionary.
+  Then A/B all three against each other.
+- **Agentic RAG** — let the model decide whether to search again, refine, or
+  answer.
+- **Cloud deployment**, with a sensible rate limit so a public URL does not
+  become someone else's API bill.
+
+### House style
+
+Match what is already there. Two things in particular:
+
+**Comments explain why, not what.** The code says what it does. A comment earns
+its place by recording a decision, a measurement, or a trap — why chunking uses
+the embedding model's tokenizer, why the monitoring database is not in WAL mode.
+
+**Claims come with evidence.** If you assert something is faster, better or
+required, say how you know. A number, a link, or a reproducible command.
+
+### What not to commit
+
+`.gitignore` already covers it, but worth knowing: the index (`data/*.db`),
+the Qdrant storage (`qdrant_data/`), the cloned docs (`data/source/`) and logs
+never go in. `data/ground_truth.csv` **is** committed on purpose, so evaluation
+results stay reproducible.
+
+---
+
 ## Acknowledgements
 
 Documentation content from [MicrosoftDocs/azure-docs](https://github.com/MicrosoftDocs/azure-docs), CC-BY-4.0.
