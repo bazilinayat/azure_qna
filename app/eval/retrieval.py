@@ -159,8 +159,18 @@ def standard_configs(final_limit: int = 5) -> dict[str, SearchConfig]:
 def sweep(
     items: list[GroundTruthItem],
     configs: dict[str, SearchConfig] | None = None,
+    on_result=None,
 ) -> list[RetrievalMetrics]:
-    """Evaluate several configurations over the same ground truth."""
+    """Evaluate several configurations over the same ground truth.
+
+    A full sweep takes tens of minutes, so one configuration failing must not
+    discard the ones that already succeeded. Each is isolated, and `on_result`
+    fires after every configuration so the caller can persist as it goes.
+
+    The realistic failure is memory: the cross-encoder configurations hold the
+    reranker, the embedding model and Qdrant results at once, and on a machine
+    also running the app container this can exhaust RAM mid-run.
+    """
 
     from app.search.hybrid_search import HybridSearch
 
@@ -171,15 +181,36 @@ def sweep(
     for name, config in configs.items():
         log.info("Evaluating: %s", name)
 
-        # A fresh HybridSearch per config, but the embedder, reranker and Qdrant
-        # client underneath are process-wide singletons, so the models load once
-        # for the whole sweep rather than once per configuration.
-        metrics = evaluate(
-            items,
-            config=config,
-            name=name,
-            search=HybridSearch(config),
-        )
+        try:
+            # A fresh HybridSearch per config, but the embedder, reranker and
+            # Qdrant client underneath are process-wide singletons, so models
+            # load once for the sweep rather than once per configuration.
+            metrics = evaluate(
+                items,
+                config=config,
+                name=name,
+                search=HybridSearch(config),
+            )
+
+        except Exception as exc:
+            # torch reports allocation failure as a RuntimeError, not a Python
+            # MemoryError, so it has to be recognised by message.
+            message = str(exc).lower()
+
+            if isinstance(exc, MemoryError) or "not enough memory" in message:
+                log.error(
+                    "Ran out of memory evaluating '%s'. Free some up and rerun "
+                    "just this one:\n"
+                    "    docker compose --profile app down\n"
+                    "    uv run python -m app.eval.main retrieval --configs '%s'\n"
+                    "Results from earlier configurations are kept.",
+                    name,
+                    name,
+                )
+            else:
+                log.exception("Configuration '%s' failed; continuing", name)
+
+            continue
 
         results.append(metrics)
 
@@ -189,6 +220,9 @@ def sweep(
             metrics.mrr,
             metrics.seconds_per_query,
         )
+
+        if on_result is not None:
+            on_result(results)
 
     return results
 

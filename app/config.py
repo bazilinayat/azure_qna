@@ -340,6 +340,18 @@ MONITORING_DATABASE_URL = f"sqlite:///{MONITORING_DATABASE_PATH}"
 # Log every answered question. Turning this off also disables the dashboard.
 MONITORING_ENABLED = _env_bool("MONITORING_ENABLED", True)
 
+# DELETE, not WAL. WAL needs an mmap'd -shm file, which does not work on Docker
+# Desktop's Windows bind mounts, so Grafana cannot read a WAL-mode database and
+# fails with "unable to open database file (14)". See app/monitoring/store.py.
+# WAL is safe on a Linux host and gives better read/write concurrency.
+MONITORING_JOURNAL_MODE = _env_str("MONITORING_JOURNAL_MODE", "DELETE").upper()
+
+if MONITORING_JOURNAL_MODE not in {"DELETE", "TRUNCATE", "PERSIST", "WAL", "MEMORY"}:
+    raise ValueError(
+        f"MONITORING_JOURNAL_MODE {MONITORING_JOURNAL_MODE!r} is not a valid "
+        f"SQLite journal mode."
+    )
+
 # --------------------------------------------------
 # Evaluation
 # --------------------------------------------------

@@ -1,0 +1,728 @@
+{
+  "uid": "azurementor-monitoring",
+  "title": "AzureMentor monitoring",
+  "description": "Live traffic, quality and cost for the AzureMentor RAG app.",
+  "tags": [
+    "azurementor",
+    "llm",
+    "rag"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Questions asked",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "azurementor-sqlite"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "azurementor-sqlite"
+          },
+          "queryText": "SELECT COUNT(*) AS questions FROM conversations WHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000",
+          "rawQueryText": "SELECT COUNT(*) AS questions FROM conversations WHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000",
+          "queryType": "table",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "description": "Total questions answered in the selected time range."
+    },
+    {
+      "id": 2,
+      "title": "Avg response time",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "azurementor-sqlite"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "azurementor-sqlite"
+          },
+          "queryText": "SELECT ROUND(AVG(total_seconds), 2) AS seconds FROM conversations WHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000",
+          "rawQueryText": "SELECT ROUND(AVG(total_seconds), 2) AS seconds FROM conversations WHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000",
+          "queryType": "table",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "description": "Retrieval plus generation, averaged."
+    },
+    {
+      "id": 3,
+      "title": "Judged relevant",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "azurementor-sqlite"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "azurementor-sqlite"
+          },
+          "queryText": "SELECT ROUND(100.0 * SUM(CASE WHEN relevance = 'RELEVANT' THEN 1 ELSE 0 END) / COUNT(*), 1) AS percent FROM conversations WHERE relevance IS NOT NULL AND created_at_unix BETWEEN $__from/1000 AND $__to/1000",
+          "rawQueryText": "SELECT ROUND(100.0 * SUM(CASE WHEN relevance = 'RELEVANT' THEN 1 ELSE 0 END) / COUNT(*), 1) AS percent FROM conversations WHERE relevance IS NOT NULL AND created_at_unix BETWEEN $__from/1000 AND $__to/1000",
+          "queryType": "table",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "description": "Share of answers the LLM judge rated RELEVANT."
+    },
+    {
+      "id": 4,
+      "title": "Tokens used",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "azurementor-sqlite"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "azurementor-sqlite"
+          },
+          "queryText": "SELECT SUM(total_tokens) AS tokens FROM conversations WHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000",
+          "rawQueryText": "SELECT SUM(total_tokens) AS tokens FROM conversations WHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000",
+          "queryType": "table",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "description": "Prompt plus completion tokens."
+    },
+    {
+      "id": 5,
+      "title": "Response time",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "azurementor-sqlite"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "azurementor-sqlite"
+          },
+          "queryText": "SELECT $__unixEpochGroupSeconds(created_at_unix, 3600) AS time,\n       ROUND(AVG(retrieval_seconds), 3)  AS retrieval,\n       ROUND(AVG(generation_seconds), 3) AS generation\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1\nORDER BY 1",
+          "rawQueryText": "SELECT $__unixEpochGroupSeconds(created_at_unix, 3600) AS time,\n       ROUND(AVG(retrieval_seconds), 3)  AS retrieval,\n       ROUND(AVG(generation_seconds), 3) AS generation\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1\nORDER BY 1",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "description": "Split by stage, so a slowdown can be attributed to search or to the LLM."
+    },
+    {
+      "id": 6,
+      "title": "Token usage",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "azurementor-sqlite"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "azurementor-sqlite"
+          },
+          "queryText": "SELECT $__unixEpochGroupSeconds(created_at_unix, 3600) AS time,\n       ROUND(AVG(prompt_tokens))     AS prompt,\n       ROUND(AVG(completion_tokens)) AS completion\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1\nORDER BY 1",
+          "rawQueryText": "SELECT $__unixEpochGroupSeconds(created_at_unix, 3600) AS time,\n       ROUND(AVG(prompt_tokens))     AS prompt,\n       ROUND(AVG(completion_tokens)) AS completion\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1\nORDER BY 1",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "description": "Average tokens per question. Prompt tokens dominate and are driven by LLM_CONTEXT_CHUNKS."
+    },
+    {
+      "id": 7,
+      "title": "Cost per day",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "azurementor-sqlite"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "azurementor-sqlite"
+          },
+          "queryText": "SELECT $__unixEpochGroupSeconds(created_at_unix, 86400) AS time,\n       ROUND(SUM(COALESCE(cost_usd, 0)), 6) AS cost\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1\nORDER BY 1",
+          "rawQueryText": "SELECT $__unixEpochGroupSeconds(created_at_unix, 86400) AS time,\n       ROUND(SUM(COALESCE(cost_usd, 0)), 6) AS cost\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1\nORDER BY 1",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "description": "Zero while the model's price is unknown. Set LLM_PRICE_INPUT_PER_1M and LLM_PRICE_OUTPUT_PER_1M in .env to populate this."
+    },
+    {
+      "id": 8,
+      "title": "Questions per hour",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "azurementor-sqlite"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "azurementor-sqlite"
+          },
+          "queryText": "SELECT $__unixEpochGroupSeconds(created_at_unix, 3600) AS time,\n       COUNT(*) AS questions\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1\nORDER BY 1",
+          "rawQueryText": "SELECT $__unixEpochGroupSeconds(created_at_unix, 3600) AS time,\n       COUNT(*) AS questions\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1\nORDER BY 1",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "description": "Traffic volume over time."
+    },
+    {
+      "id": 9,
+      "title": "Model usage",
+      "type": "piechart",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "azurementor-sqlite"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "azurementor-sqlite"
+          },
+          "queryText": "SELECT model, COUNT(*) AS count\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY model",
+          "rawQueryText": "SELECT model, COUNT(*) AS count\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY model",
+          "queryType": "table",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": true
+        }
+      },
+      "description": "Which answering model served the traffic."
+    },
+    {
+      "id": 10,
+      "title": "Relevance distribution",
+      "type": "piechart",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "azurementor-sqlite"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 20,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "azurementor-sqlite"
+          },
+          "queryText": "SELECT COALESCE(relevance, 'UNJUDGED') AS relevance, COUNT(*) AS count\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1",
+          "rawQueryText": "SELECT COALESCE(relevance, 'UNJUDGED') AS relevance, COUNT(*) AS count\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1",
+          "queryType": "table",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RELEVANT"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PARTLY_RELEVANT"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "NON_RELEVANT"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": true
+        }
+      },
+      "description": "The LLM judge's verdict on every answer served."
+    },
+    {
+      "id": 11,
+      "title": "User feedback",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "azurementor-sqlite"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 20,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "azurementor-sqlite"
+          },
+          "queryText": "SELECT SUM(CASE WHEN value =  1 THEN 1 ELSE 0 END) AS \"thumbs up\",\n       SUM(CASE WHEN value = -1 THEN 1 ELSE 0 END) AS \"thumbs down\"\nFROM feedback\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000",
+          "rawQueryText": "SELECT SUM(CASE WHEN value =  1 THEN 1 ELSE 0 END) AS \"thumbs up\",\n       SUM(CASE WHEN value = -1 THEN 1 ELSE 0 END) AS \"thumbs down\"\nFROM feedback\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000",
+          "queryType": "table",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "thumbs up"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "thumbs down"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "description": "Thumbs collected in the app."
+    },
+    {
+      "id": 12,
+      "title": "Recent conversations",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "azurementor-sqlite"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "azurementor-sqlite"
+          },
+          "queryText": "SELECT created_at, question, COALESCE(relevance, 'UNJUDGED') AS relevance,\n       ROUND(total_seconds, 2) AS seconds, total_tokens AS tokens,\n       num_sources_cited AS cited\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nORDER BY created_at_unix DESC\nLIMIT 20",
+          "rawQueryText": "SELECT created_at, question, COALESCE(relevance, 'UNJUDGED') AS relevance,\n       ROUND(total_seconds, 2) AS seconds, total_tokens AS tokens,\n       num_sources_cited AS cited\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nORDER BY created_at_unix DESC\nLIMIT 20",
+          "queryType": "table",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false,
+          "fields": ""
+        }
+      },
+      "description": "Newest first."
+    },
+    {
+      "id": 13,
+      "title": "Judge and user disagree",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "azurementor-sqlite"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "azurementor-sqlite"
+          },
+          "queryText": "SELECT c.created_at, c.question, c.relevance,\n       CASE WHEN f.value = 1 THEN 'thumbs up' ELSE 'thumbs down' END AS user_vote,\n       c.relevance_explanation\nFROM conversations c\nJOIN feedback f ON f.conversation_id = c.id\nWHERE ((f.value = -1 AND c.relevance = 'RELEVANT')\n    OR (f.value =  1 AND c.relevance = 'NON_RELEVANT'))\n  AND c.created_at_unix BETWEEN $__from/1000 AND $__to/1000\nORDER BY c.created_at_unix DESC",
+          "rawQueryText": "SELECT c.created_at, c.question, c.relevance,\n       CASE WHEN f.value = 1 THEN 'thumbs up' ELSE 'thumbs down' END AS user_vote,\n       c.relevance_explanation\nFROM conversations c\nJOIN feedback f ON f.conversation_id = c.id\nWHERE ((f.value = -1 AND c.relevance = 'RELEVANT')\n    OR (f.value =  1 AND c.relevance = 'NON_RELEVANT'))\n  AND c.created_at_unix BETWEEN $__from/1000 AND $__to/1000\nORDER BY c.created_at_unix DESC",
+          "queryType": "table",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "description": "Answers the judge liked but users did not, and the reverse. This is where prompt problems surface."
+    }
+  ]
+}

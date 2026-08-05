@@ -1,343 +1,332 @@
 # AzureMentor
 
-A retrieval-augmented mentor for learning Microsoft Azure. Ask it a question in
-plain English and it answers from the official Azure documentation, with links
-back to the pages it used.
+**A retrieval-augmented mentor that teaches Microsoft Azure from the official
+documentation, and cites every page it used.**
 
-> **Status: complete end to end.** Ingestion, chunking, hybrid search, answer
-> generation, evaluation, the web interface and monitoring all work. Remaining:
-> the agentic layer, Grafana dashboard panels, and a public deployment — see
-> [Roadmap](#roadmap).
+Ask a question in plain English. AzureMentor searches ~32,000 chunks of Microsoft
+Learn documentation, feeds the best matches to an LLM, and returns an answer with
+inline citations back to the exact pages. If the documentation does not cover
+your question, it says so instead of guessing.
+
+Built as the capstone for the [DataTalks.Club LLM Zoomcamp](https://github.com/DataTalksClub/llm-zoomcamp).
+
+> **Deep dive:** [ARCHITECTURE.md](ARCHITECTURE.md) explains how every part works
+> and exactly which file to open to change each behaviour.
+
+---
 
 ## The problem
 
-Azure's documentation is enormous and organised by service, not by question.
-Someone learning Azure knows what they want to accomplish ("how do I stop a
-storage container being publicly readable?") but not which of 145 service areas
-holds the answer, nor the product vocabulary needed to search for it. General
-chat assistants answer confidently but cite nothing and drift out of date.
+Azure's documentation is enormous — roughly 13,500 articles across 145 service
+areas — and it is organised **by service**, not by question.
 
-AzureMentor indexes the real documentation and answers from it, so every answer
-is traceable to a Microsoft Learn page.
+Someone learning Azure has the opposite problem. They know what they want to
+accomplish ("how do I stop this storage container being publicly readable?") but
+not which service area holds the answer, nor the product vocabulary needed to
+search for it. They type `vm` and the docs say "virtual machine". They type
+`rbac` and the docs say "role-based access control". Search returns nothing
+useful, so they end up on a general-purpose chatbot, which answers confidently,
+cites nothing, mixes up Azure with AWS, and describes portal screens that were
+redesigned two years ago.
+
+For anyone learning a cloud platform, an answer you cannot verify is worse than
+no answer — you will build on it.
+
+**AzureMentor indexes the real documentation and answers only from it.** Every
+claim carries a citation to a Microsoft Learn URL you can open. When retrieval
+comes back empty, the LLM is never called at all, because an ungrounded answer is
+exactly the failure this project exists to prevent.
+
+---
+
+## What it looks like
+
+> **Screenshots to add:** `docs/screenshot-chat.png` (a question with citations
+> and the sources panel expanded), `docs/screenshot-grafana.png` (the dashboard).
+> Both are recommended by the project guidelines.
+
+```
+You > How do I stop a blob container from being publicly readable?
+
+To stop a blob container from being publicly readable, set the storage account's
+AllowBlobPublicAccess property to false, and set the container's anonymous access
+level to Private [1].
+
+  az storage account update --name <account> --resource-group <rg> \
+      --allow-blob-public-access false
+
+Why this works: disallowing anonymous access at the account level prevents any
+container in that account from being read without authorization, regardless of
+the container's own setting [4].
+
+--------------------------------------------------------------------------------
+Sources cited (2 of 5 retrieved)
+--------------------------------------------------------------------------------
+[1] Configure anonymous read access for containers and blobs - Azure Storage
+    https://learn.microsoft.com/azure/storage/blobs/anonymous-read-access-configure
+[4] Overview of remediating anonymous read access for blob data - Azure Storage
+    https://learn.microsoft.com/azure/storage/blobs/anonymous-read-access-overview
+
+retrieval 1.7s  generation 4.3s  |  2282 in + 324 out tokens
+```
+
+---
 
 ## Architecture
 
-```
-MicrosoftDocs/azure-docs  (git, sparse checkout)
-        |
-        v
-  clean + parse frontmatter          app/ingest/markdown.py
-        |
-        v
-  header-aware chunking              app/ingest/chunker.py
-        |
-        v
-  SQLite: documents + chunks         app/db/
-        |
-        +---------------------------+
-        |                           |
-        v                           v
-  FTS5 / BM25 index          bge-small embeddings -> Qdrant
-  app/db/fts.py              app/embedding/
-        |                           |
-        +------------+--------------+
-                     v
-        Reciprocal Rank Fusion       app/search/rrf.py
-                     v
-        cross-encoder reranking      app/search/reranker.py
-                     v
-              top-k chunks
+```mermaid
+flowchart LR
+    subgraph B["BUILD  (once, ~1 hour)"]
+        direction TB
+        R["azure-docs<br/>markdown clone"] --> C["clean + chunk<br/>480 tokens"]
+        C --> D[("SQLite<br/>documents + chunks")]
+        D --> F["FTS5 / BM25"]
+        D --> E["bge-small<br/>embeddings"] --> QD[("Qdrant")]
+    end
+
+    subgraph S["ASK  (per question, ~5 s)"]
+        direction TB
+        Q(["question"]) --> K["BM25"]
+        Q --> V["vector search"]
+        K --> RR["RRF fusion"]
+        V --> RR
+        RR --> P["prompt + context"] --> L["OpenAI"] --> A(["answer + citations"])
+        RR -.->|"off by default<br/>see EVALUATION.md"| RK["expansion +<br/>cross-encoder rerank"]
+        RK -.-> P
+    end
+
+    subgraph M["OBSERVE"]
+        direction TB
+        J["LLM judge"] --> MDB[("monitoring.db")] --> G["Grafana"]
+    end
+
+    F -.-> K
+    QD -.-> V
+    A --> J
+    UI["Streamlit"] --> Q
+    A --> UI
 ```
 
-## Quick start
+Full diagrams, including the per-request sequence, are in
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
-Requires Python 3.13+, [uv](https://docs.astral.sh/uv/), and Docker.
+---
+
+## Dataset
+
+| | |
+|---|---|
+| **Source** | [MicrosoftDocs/azure-docs](https://github.com/MicrosoftDocs/azure-docs) — the official Azure documentation, CC-BY-4.0 |
+| **How it is obtained** | Cloned automatically by the ingestion pipeline. Nothing to download by hand. |
+| **Scope indexed** | 15 core services (app-service, azure-functions, storage, virtual-network, api-management, logic-apps, event-grid, RBAC, ARM, cost-management, governance, security, container-apps, service-bus, static-web-apps) |
+| **Volume** | ~3,850 articles → **31,736 chunks** |
+| **Ground truth** | `data/ground_truth.csv` — 450 LLM-generated questions, committed so evaluation is reproducible |
+
+The clone is markdown-only: a plain shallow clone costs 7.6 GB because
+`articles/` is mostly screenshots. A non-cone sparse checkout with
+`--filter=blob:none` fetches **252 MB** — all 15,024 markdown files, zero images.
+
+Widen or narrow the scope with `INGEST_CATEGORIES`, or set
+`INGEST_ALL_CATEGORIES=true` for all 145 services.
+
+---
+
+## Running it
+
+### Prerequisites
+
+- **Docker Desktop** (or Docker Engine + Compose)
+- **An OpenAI API key** — you supply your own; see [Cost](#cost) below
+- For the local (non-Docker) path: **Python 3.13+** and [uv](https://docs.astral.sh/uv/)
+
+### 1. Clone and configure
 
 ```bash
-uv sync
+git clone <this-repo> && cd azure_qna
 ```
 
 ```bash
 cp .env.example .env
 ```
 
+Open `.env` and set `OPENAI_API_KEY`. Everything else has a working default.
+
+### 2. Start the infrastructure
+
 ```bash
 docker compose up -d
 ```
 
-Then build the index. This clones the Azure docs, ingests them, and embeds them:
+Brings up Qdrant (`:6333`) and Grafana (`:3000`).
+
+### 3. Build the index
+
+This clones the docs, chunks them, builds the BM25 index and embeds everything.
+
+```bash
+uv sync
+```
 
 ```bash
 uv run python -m app.pipeline --fresh
 ```
 
-Expect roughly **an hour** on an 8-core CPU for the default 15-service scope
-(~3,900 articles, ~27,000 chunks). The run is resumable — if it is interrupted,
-rerun the same command and it continues from where it stopped.
+**Takes about an hour** on an 8-core CPU. It is resumable — if it stops, run the
+same command *without* `--fresh` and it continues from where it left off.
 
-Query it:
+> **Reviewing this project and don't want to wait an hour?** Build a small slice
+> instead. Roughly three minutes, and everything works — just with less coverage:
+>
+> ```bash
+> INGEST_CATEGORIES=storage uv run python -m app.pipeline --fresh --limit 100
+> ```
+>
+> On Windows PowerShell: `$env:INGEST_CATEGORIES="storage"` first, then run the
+> command without the prefix.
 
-```bash
-uv run python -m app.search.main
-```
-
-Or run a single query non-interactively:
-
-```bash
-uv run python -m app.search.main "how do I restrict blob access to a vnet"
-```
-
-## Asking questions
-
-`app.search.main` returns raw chunks. To get an actual answer, use the LLM layer
-(requires `OPENAI_API_KEY` in `.env`):
-
-```bash
-uv run python -m app.llm.main "how do I stop a blob container being publicly readable"
-```
-
-Every answer cites its sources inline as `[1]`, `[2]`, and only the sources the
-model actually cited are listed underneath — retrieval always returns its top-k,
-so printing all of them would imply they were all used. Each answer also reports
-its retrieval time, generation time, token counts and cost.
-
-Three things worth knowing:
-
-**It refuses rather than guesses.** If retrieval returns nothing, the model is
-never called at all — answering with no context is precisely the confident,
-uncited guess this project exists to avoid. If retrieval returns only irrelevant
-chunks, the prompt instructs the model to say the documentation does not cover
-it.
-
-**Prompts are versioned.** `app/llm/prompts.py` holds three variants —
-`grounded_mentor` (default), `concise` and `strict_extractive` — so the LLM
-evaluation has something to compare:
-
-```bash
-uv run python -m app.llm.main --prompt concise "what are the blob access tiers"
-```
-
-**Cost is reported honestly or not at all.** Prices cannot be read from the API,
-so `LLM_PRICING` in `app/config.py` is a hard-coded table. A model that is not in
-it reports its token counts normally but leaves cost as unknown rather than
-inventing a number. Fill it in with `LLM_PRICE_INPUT_PER_1M` and
-`LLM_PRICE_OUTPUT_PER_1M` in `.env`.
-
-Note that the first question in a session takes ~20 seconds because the embedding
-and reranker models load on first use. Subsequent questions retrieve in ~1.7s.
-
-## The pipeline runner
-
-Everything runs through one entry point, `app/pipeline.py`, which executes the
-stages in dependency order and logs timing and row counts for each to both the
-console and a timestamped file in `logs/`.
-
-| Stage | Does |
-|---|---|
-| `database` | Creates the schema and the FTS5 virtual table |
-| `ingest` | Syncs the docs repo, cleans, chunks, loads SQLite |
-| `fts` | Rebuilds the BM25 index from `chunks` |
-| `embed` | Embeds chunks and upserts into Qdrant |
-| `verify` | Cross-checks counts and runs a live probe query |
-
-```bash
-uv run python -m app.pipeline --fresh
-```
-
-Useful variations:
-
-```bash
-uv run python -m app.pipeline --limit 40
-```
-
-```bash
-uv run python -m app.pipeline --stages fts,embed
-```
-
-```bash
-uv run python -m app.pipeline --from embed
-```
-
-Exit codes: `0` success, `1` a stage raised, `2` stages ran but `verify` found an
-inconsistency.
-
-## Design decisions worth knowing
-
-**Chunking is measured in the embedding model's tokens, not tiktoken.**
-`bge-small-en-v1.5` truncates at 512 tokens, and its WordPiece tokenizer emits
-~1.27x more tokens than `cl100k_base` on Azure docs — identifiers, hyphenated
-resource names and URLs all shred into subwords. Chunking to "512 tiktoken
-tokens" therefore produces ~650-token chunks whose tails the encoder silently
-discards. Chunks are budgeted at 480 real tokens, and a final pass guarantees
-nothing exceeds it.
-
-**Chunks follow document structure and carry their breadcrumb.** Splitting on
-markdown headers keeps code blocks, tables and procedures intact, and every chunk
-is prefixed with its header path (`Introduction to Azure Blob Storage > Blob
-Storage resources > Containers`). That gives the embedding topical grounding and
-gives BM25 the service names to match on. Packing runs across sections rather
-than restarting at each header — per-section packing fragmented the corpus into
-~14 chunks per document averaging a third of the budget.
-
-**`includes/` fragments are skipped.** ~1,480 of the 15,000 markdown files are
-reusable partials with no title and no standalone meaning.
-
-**The clone is markdown-only.** `articles/` is ~4 GB, mostly screenshots across
-336 `media/` directories, and a plain shallow clone of the repo costs 7.6 GB. A
-cone-mode sparse checkout of `articles` would still pull every image, so the
-checkout uses a non-cone `*.md` pattern together with `--filter=blob:none`, which
-means git never downloads the image blobs at all. Measured result: **252 MB, all
-15,024 markdown files, zero non-markdown files.**
-
-**Retrieval is hybrid and fused with RRF.** BM25 catches exact resource names and
-CLI flags that embeddings blur; vectors catch paraphrase. RRF combines them
-without needing to normalise BM25 against cosine. Each (query variant, retriever)
-pair is fused as its own ranking.
-
-**The embedding backend is torch, not fastembed.** fastembed ships the
-int8-quantized ONNX build of bge-small, which measured **4x slower** than the
-fp32 torch model on identical input on this hardware (2.2 vs 8.3 chunks/s over
-128 real chunks). Both backends are implemented; `EMBEDDING_BACKEND` selects one.
-They do not share a vector space, so switching re-embeds automatically — the
-resume marker records the backend as well as the model.
-
-**Indexing is resumable and self-healing.** `chunks.embedding_model` stores
-`backend:model` per row, written only after the Qdrant upsert returns. Changing
-model or backend makes stale rows pending again, so the index can never end up
-silently split between two incompatible vector spaces.
-
-## Configuration
-
-All settings live in `app/config.py` and are overridable by environment
-variable; see [.env.example](.env.example) for the full list with explanations.
-The ones that matter most:
-
-| Variable | Default | Notes |
-|---|---|---|
-| `INGEST_CATEGORIES` | 15 core services | Comma-separated folder names |
-| `INGEST_ALL_CATEGORIES` | `false` | `true` indexes all 145, several hours |
-| `CHUNK_MAX_TOKENS` | `480` | The retrieval experiment knob, see below |
-| `EMBEDDING_BACKEND` | `torch` | or `fastembed` |
-| `EMBEDDING_THREADS` | `8` | Throughput plateaus here |
-
-### Chunk size is one knob
-
-Chunk size is the highest-value variable to sweep when evaluating retrieval, so
-it is deliberately the only one you need to change. Set it and everything else
-follows:
-
-```bash
-uv run python -m app.pipeline --fresh --chunk-size 256
-```
-
-That derives the overlap (1/8 of the chunk size), the minimum chunk size (1/16),
-the database file (`data/azurementor-c256.db`) and the Qdrant collection
-(`azure_docs_c256`). Because the storage names carry the chunk profile, **two
-chunk sizes never overwrite each other** — build several, then switch between
-them instantly:
-
-```bash
-uv run python -m app.search.main --chunk-size 256
-```
-
-A fixed overlap is the trap this avoids: leaving the 480-token default of 60 in
-place while testing 128-token chunks would mean ~50% overlap and a corpus half
-made of duplicates. Startup also refuses a chunk size above the embedding
-model's limit, since chunks over it are truncated with no error at all.
-
-Do not set `DATABASE_PATH` or `QDRANT_COLLECTION` in `.env` — pinning either one
-routes every chunk size to the same store, which silently turns a comparison
-between two sizes into a comparison of one size against itself. The pipeline
-warns if you have.
-
-## The web app
+### 4. Run the app
 
 ```bash
 docker compose --profile app up -d --build
 ```
 
-Then open <http://localhost:8501>. To run it against your host Python instead:
+Open **<http://localhost:8501>**.
 
-> **Two things make this build work, and it fails badly without either.**
->
-> `.dockerignore` — the repo directory is ~3.3 GB once the index, Qdrant storage
-> and `.venv` are in it, and Docker uploads the whole thing as build context
-> otherwise. With it, the context is 0.6 MB.
->
-> CPU-only torch — the default PyPI torch wheel for Linux bundles CUDA: 43
-> `nvidia-*` packages plus triton, around 5 GB installed, none of it usable in a
-> container with no GPU. `[tool.uv.sources]` in `pyproject.toml` pins Linux to
-> the PyTorch CPU index. Windows resolution is untouched. Note that this only
-> works because `torch` is declared as a direct dependency — uv source overrides
-> do not apply to transitive ones.
->
-> Together those two accounted for roughly 8 GB of pointless I/O, which was
-> enough to kill the buildkit daemon partway through unpacking.
+Or run it against your local Python instead of in a container:
 
 ```bash
 uv run streamlit run app/ui/streamlit_app.py
 ```
 
-**Chat history is session-only.** It lives in Streamlit's session state and dies
-with the browser tab. The app says so in a banner rather than leaving people to
-find out — anyone who assumes otherwise loses work. The sidebar exports the
-conversation as Word or PDF, generated in memory and never written to disk.
+### Command-line alternatives
 
-What *is* kept is the monitoring record for each answer: question, answer,
-latency, tokens, cost, the judge's relevance verdict and any thumbs up/down. That
-distinction is stated in the UI, not buried here.
+```bash
+uv run python -m app.llm.main "how do I restrict blob access to a vnet"
+```
+
+```bash
+uv run python -m app.search.main "blob access tiers"
+```
+
+The second returns raw retrieved chunks with scores — useful for judging
+retrieval quality without spending tokens.
+
+### Verify it works
+
+```bash
+uv run pytest
+```
+
+76 tests, no API calls, no network.
+
+---
+
+## Cost
+
+You run this with your own OpenAI key. There is no hosted instance, deliberately.
+
+Per question, measured:
+
+| | Tokens |
+|---|---|
+| Prompt (5 chunks of context + question) | ~2,300 |
+| Answer | ~300 |
+| Relevance judge (optional second call) | ~700 |
+
+The dominant cost is context. Two switches control it:
+
+```bash
+LLM_CONTEXT_CHUNKS=3        # fewer chunks per prompt
+JUDGE_LIVE_ANSWERS=false    # skip the judge, halves calls per question
+```
+
+`LLM_PRICING` in `app/config.py` is a hard-coded table, because prices are not
+readable from the API. A model that is not listed reports its token counts
+normally but leaves cost as **unknown** rather than inventing a number. To enable
+cost tracking for your model, look up its rate and set:
+
+```bash
+LLM_PRICE_INPUT_PER_1M=...
+LLM_PRICE_OUTPUT_PER_1M=...
+```
+
+**Set a spend limit on your API key before you start experimenting.** A full
+prompt-evaluation sweep is `prompts × questions × 2` API calls.
+
+---
 
 ## Evaluation
 
-```bash
-uv run python -m app.eval.main generate --sample 150
-```
-
-Ground truth cannot be hand-written at useful scale, so the LLM reads an indexed
-document and writes questions it answers. The source document is the correct
-answer by construction, which is what makes hit rate and MRR computable. Uses the
-API.
+Ground truth is synthetic: the LLM reads an indexed document and writes questions
+that document answers, so the source document is the correct answer by
+construction. 450 questions are committed in `data/ground_truth.csv`.
 
 ```bash
-uv run python -m app.eval.main retrieval
+uv run python -m app.eval.main generate --sample 150   # regenerate (uses API)
+uv run python -m app.eval.main retrieval               # free, no API calls
+uv run python -m app.eval.main answers --sample 30     # uses API
+uv run python -m app.eval.main live                    # summarise real traffic
 ```
 
-Sweeps six retrieval configurations — keyword only, vector only, hybrid, and each
-with expansion and reranking — reporting hit rate, MRR, hit@1, hit@3 and latency.
-No API calls, so this is free to re-run after any retrieval change.
+Results are written to `eval_results/` as timestamped CSVs.
 
-```bash
-uv run python -m app.eval.main answers --sample 30
-```
+### Retrieval evaluation
 
-Answers the same questions with each prompt template and scores them with the
-LLM-as-judge. Reports relevance breakdown plus a *grounding rate* — how often the
-expected document was actually retrieved. That second number is what tells you
-where a bad score comes from: high grounding with low relevance is a prompt
-problem, low grounding is a retrieval problem and no prompt will fix it.
+Six configurations over the same 450 questions, top-5, scored on hit rate and MRR:
 
-```bash
-uv run python -m app.eval.main live
-```
+| Configuration | Hit rate | MRR | Hit@1 | s/query |
+|---|---|---|---|---|
+| keyword only (BM25) | 0.900 | 0.765 | 0.673 | 0.25 |
+| vector only | 0.876 | 0.767 | 0.696 | **0.07** |
+| **hybrid (RRF)** ← used | 0.933 | **0.835** | **0.771** | 0.33 |
+| hybrid + expansion | 0.927 | 0.828 | 0.764 | 0.37 |
+| hybrid + rerank | 0.940 | 0.825 | 0.749 | 1.91 |
+| hybrid + expansion + rerank | **0.942** | 0.825 | 0.749 | 1.95 |
 
-The same judge that scores the offline set also scores every live answer, so
-offline and production numbers are directly comparable. Results land in
-`eval_results/` as timestamped CSVs.
+**Hybrid search is a clear win**: fusing BM25 with vectors lifts MRR from
+0.765/0.767 to 0.835, about six times the standard error at n=450.
 
-**A caveat on synthetic ground truth:** questions generated from a document tend
-to echo its vocabulary, which flatters keyword search. The generation prompt
-pushes against this, but the bias cannot be removed. Treat absolute numbers as
-soft and comparisons between configurations as sound.
+**Reranking and query expansion were measured and turned off.** The cross-encoder
+bought +0.7pp hit rate — inside the ~1.2pp standard error, so not a real
+difference — while lowering MRR by 1.0pp and hit@1 by 2.2pp at **5.7× the
+latency**. Expansion was slightly negative on every metric. Both remain
+implemented, tested and switchable; they are off because the measurement said so.
+
+Full analysis and caveats in **[EVALUATION.md](EVALUATION.md)**.
+
+### LLM evaluation
+
+Three prompt templates — `grounded_mentor`, `concise`, `strict_extractive` —
+answer the same questions and are scored by an LLM-as-judge into
+`RELEVANT` / `PARTLY_RELEVANT` / `NON_RELEVANT`.
+
+Alongside relevance, the report includes a **grounding rate**: how often the
+expected document was actually retrieved. That separates the two failure modes —
+high grounding with low relevance is a prompt problem; low grounding is a
+retrieval problem no prompt can fix.
+
+The **same judge** scores live traffic in the app, so offline and production
+numbers are directly comparable.
+
+> **A caveat, stated honestly:** questions generated from a document tend to
+> reuse its vocabulary, which flatters keyword search. Treat absolute numbers as
+> soft and the comparisons between configurations as sound.
+
+---
 
 ## Monitoring
 
-Every answered question is logged to `data/monitoring.db` — deliberately a
-separate database from the index, since the index is dropped and rebuilt by
-`--fresh` and conversation history must survive that.
+Every answered question is logged to `data/monitoring.db` — a **separate**
+database from the index, because `--fresh` drops the index and conversation
+history has to survive that.
 
-Grafana reads it directly via the SQLite datasource plugin, provisioned
-automatically. See **[grafana/README.md](grafana/README.md)** for the schema and
-ready-to-paste queries.
+Recorded per answer: question, answer, model, prompt template, chunk profile,
+retrieval/generation/total latency, prompt/completion/reasoning tokens, cost,
+sources retrieved vs cited, the judge's relevance verdict, and any thumbs
+up/down from the user.
+
+Grafana reads it directly through the SQLite datasource plugin, provisioned
+automatically:
 
 ```bash
 docker compose up -d grafana
@@ -345,108 +334,167 @@ docker compose up -d grafana
 
 <http://localhost:3000> — anonymous read-only, `admin`/`admin` to edit.
 
-## Deploying publicly
+A dashboard with **13 panels** is provisioned automatically — response time,
+token usage, cost, model usage, relevance distribution, user feedback, recent
+conversations, and where the judge and users disagree. Open
+<http://localhost:3000/d/azurementor-monitoring>.
 
-Measured footprint: **1.4 GB** Qdrant storage, **432 MB** index database, ~250 MB
-of models in the image. That ~2 GB is what rules options in or out.
+**[grafana/DASHBOARD.md](grafana/DASHBOARD.md)** explains every panel and how the
+course lesson's PostgreSQL translates to SQLite.
+**[grafana/README.md](grafana/README.md)** has the datasource wiring, the full
+schema, and a wider query cookbook. Every SQL block in both has been executed
+against the live datasource.
 
-**A small VPS is the realistic choice.** Hetzner CX22 or a DigitalOcean basic
-droplet, roughly $5-7/month, comfortably fits everything:
+---
+
+## Configuration
+
+Every setting lives in `app/config.py` and is overridable by environment
+variable. See [.env.example](.env.example) for the full annotated list.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `OPENAI_API_KEY` | — | **Required** |
+| `LLM_MODEL` | `gpt-5.4-mini` | Answering model |
+| `LLM_PROMPT` | `grounded_mentor` | Prompt template |
+| `LLM_CONTEXT_CHUNKS` | `5` | Chunks per prompt — the main cost lever |
+| `JUDGE_LIVE_ANSWERS` | `true` | Judge live answers (doubles API calls) |
+| `INGEST_CATEGORIES` | 15 services | Which Azure services to index |
+| `CHUNK_MAX_TOKENS` | `480` | Chunk size; derives overlap, DB name, collection |
+| `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | |
+| `EMBEDDING_BACKEND` | `torch` | or `fastembed` |
+
+**Do not set `DATABASE_PATH` or `QDRANT_COLLECTION`.** They derive from the chunk
+size so different chunk experiments cannot overwrite each other. Pinning them
+silently turns a comparison between two chunk sizes into a comparison of one
+against itself. The pipeline warns if you have.
+
+---
+
+## Ingestion pipeline
+
+One entry point runs every stage in dependency order, logging timing and row
+counts to both the console and a timestamped file in `logs/`.
+
+| Stage | Does |
+|---|---|
+| `database` | Creates the schema and the FTS5 virtual table |
+| `ingest` | Syncs the docs repo, cleans, chunks, loads SQLite |
+| `fts` | Rebuilds the BM25 index |
+| `embed` | Embeds chunks and upserts into Qdrant |
+| `verify` | Cross-checks counts and runs a live probe query |
 
 ```bash
-git clone <your-repo> && cd azure_qna
+uv run python -m app.pipeline --fresh          # full rebuild
+uv run python -m app.pipeline --from embed     # resume from a stage
+uv run python -m app.pipeline --stages fts     # one stage only
+uv run python -m app.pipeline --limit 40       # smoke test, ~80 seconds
 ```
 
-```bash
-docker compose --profile app up -d --build
-```
+Exit codes: `0` success, `1` a stage raised, `2` ran but `verify` found an
+inconsistency.
 
-Copy `data/` and `qdrant_data/` up with `rsync` rather than rebuilding the index
-on the server — an hour of CPU on a small VPS is slower and costs more than the
-transfer. Put Caddy or nginx in front for TLS, and **do not expose port 6333**:
-Qdrant has no authentication by default.
+---
 
-**Free tiers are awkward but possible.** Streamlit Community Cloud caps at 1 GB
-RAM and cannot host Qdrant; you would pair it with Qdrant Cloud's free 1 GB
-cluster and still need the SQLite index, which exceeds GitHub's 100 MB file limit
-without LFS. Hugging Face Spaces with the Docker SDK is the better free option —
-2 vCPU and 16 GB RAM — but its disk is ephemeral, so the index has to be baked
-into the image or restored on boot.
+## Design decisions worth knowing
 
-**If you want the index smaller,** most of those 432 MB is `documents.content`,
-the full article text, which serving does not need — only `chunks` and the FTS
-index are read at query time. A serving-only copy with that column dropped should
-land near 80 MB, which changes what is deployable. Not built yet.
+Full detail in [ARCHITECTURE.md](ARCHITECTURE.md); the short version:
 
-Whatever you pick, set `OPENAI_API_KEY` as a platform secret, never in the image,
-and put a spend limit on the API key before the URL is public.
+**Chunking is measured in the embedding model's tokens, not tiktoken.**
+`bge-small-en-v1.5` truncates at 512 tokens and its WordPiece tokenizer emits
+~1.27× more tokens than `cl100k_base` on Azure docs. Chunking to "512 tiktoken
+tokens" produces ~650-token chunks whose tails the encoder silently discards —
+no error, no warning. Chunks are budgeted at 480 real tokens with a final pass
+that guarantees nothing exceeds it.
 
-## Known gaps
+**Chunks follow document structure and carry their breadcrumb.** Splitting on
+markdown headers keeps code blocks, tables and procedures intact, and every chunk
+is prefixed with its header path, which grounds the embedding and gives BM25 the
+service names to match on.
 
-**Corpus coverage.** Microsoft split the old monolithic `azure-docs` repository:
-virtual machines, AKS, Key Vault, Cosmos DB, Monitor, Machine Learning and Entra
-ID now live in separate repositories and are **not** in this index. `SOURCE_REPOS`
-in `app/config.py` is a list specifically so they can be added.
+**Retrieval is hybrid, fused with RRF.** BM25 catches exact resource names and
+CLI flags that embeddings blur; vectors catch paraphrase. RRF combines rankings
+without needing to normalise BM25 against cosine.
 
-**Ingest is not incremental.** Re-running `ingest` clears and reloads, which
-reassigns chunk ids and forces a full re-embed. Adding a category is therefore a
-full rebuild. Content-hash-based upsert would fix this.
+**The embedding backend is torch, not fastembed** — measured 4× faster here
+(8.3 vs 2.2 chunks/s), because fastembed ships an int8-quantized ONNX build that
+is slower than fp32 on this CPU.
 
-## Roadmap
+**Indexing is resumable and self-healing.** Each chunk records `backend:model`
+after its upsert succeeds, so an interrupted run continues and a model change
+re-embeds automatically rather than leaving two incompatible vector spaces mixed.
 
-Ordered by dependency — the LLM layer gates everything below it.
+---
 
-- [x] **LLM layer** (`app/llm/`) — answer generation over retrieved chunks
-- [x] **Retrieval evaluation** — ground-truth set, hit rate and MRR, comparing
-      keyword vs vector vs hybrid vs hybrid+rerank
-- [x] **LLM evaluation** — LLM-as-judge over multiple prompt variants
-- [x] **Streamlit interface** with thumbs-up/down feedback capture
-- [x] **Monitoring** — persist conversations, feedback, latency, token cost;
-      Grafana over SQLite
-- [x] **Full containerization** — application in docker-compose, not just
-      dependencies
-- [ ] **Agentic RAG** — let the agent decide whether to search, refine, or answer
-- [ ] **Grafana dashboard** — panels built on the queries in grafana/README.md
-- [ ] **Cloud deployment**
-
-## Project layout
+## Project structure
 
 ```
 app/
-  config.py            all configuration, env-overridable
-  logging_setup.py     console + file logging
-  pipeline.py          the single entry point
-  db/
-    connection.py      engine, session factory, SQLite pragmas
-    schema.py          documents + chunks tables
-    fts.py             FTS5 index management and query escaping
-    db_init.py         schema creation / reset
-  ingest/
-    ingest.py          repo sync and load orchestration
-    markdown.py        frontmatter parsing, Learn directive cleaning
-    chunker.py         header-aware, token-budgeted chunking
-    tokenizer.py       token counting in the embedding model's space
-  embedding/
-    embedder.py        torch and fastembed backends
-    qdrant_client.py   collection lifecycle, bulk load tuning, search
-    index.py           resumable embed-and-upsert
-  llm/
-    client.py          OpenAI wrapper with token, cost and latency capture
-    prompts.py         versioned prompt templates
-    rag.py             retrieve -> build context -> generate
-    main.py            ask questions from the CLI
-  search/
-    hybrid_search.py   orchestration
-    keyword_search.py  BM25 over FTS5
-    vector_search.py   dense retrieval
-    rrf.py             reciprocal rank fusion
-    reranker.py        cross-encoder
-    query_expander.py  Azure acronym expansion
-    main.py            interactive CLI
+  config.py            all settings, environment-overridable
+  pipeline.py          the single ingestion entry point
+  db/                  SQLite schema, connection, FTS5 index
+  ingest/              repo sync, markdown cleaning, chunking, tokenizer
+  embedding/           torch + fastembed backends, Qdrant, resumable indexer
+  search/              hybrid search, BM25, vectors, RRF, reranker, expansion
+  llm/                 OpenAI client, prompts, RAG orchestration, CLI
+  eval/                ground truth, retrieval metrics, judge, answer eval
+  monitoring/          conversations + feedback schema and store
+  ui/                  Streamlit app, docx/pdf export
+tests/                 76 tests, no network
+grafana/               datasource provisioning + query cookbook
 ```
+
+~6,800 lines of Python.
+
+---
+
+## How this maps to the evaluation criteria
+
+| Criterion | Max | Self-assessment |
+|---|---|---|
+| Problem description | 2 | Described above with the specific failure it addresses |
+| Retrieval flow | 2 | Knowledge base (Qdrant + FTS5) **and** LLM |
+| Retrieval evaluation | 2 | 6 configurations swept; see [EVALUATION.md](EVALUATION.md) |
+| LLM evaluation | 2 | 3 prompt templates scored by LLM-as-judge |
+| Interface | 2 | Streamlit UI, plus two CLIs |
+| Ingestion pipeline | 2 | Automated, staged, resumable — `app/pipeline.py` |
+| Monitoring | 2 | Feedback collected + provisioned Grafana dashboard with 13 panels |
+| Containerization | 2 | Everything in `docker-compose`, app included |
+| Reproducibility | 2 | Data fetched automatically; instructions above |
+| Hybrid search | 1 | BM25 + vectors fused with RRF; measured **+7pp MRR** over either alone |
+| Document re-ranking | 1 | Cross-encoder implemented and evaluated; off by default because it did not help |
+| Query rewriting | 1 | Acronym expansion implemented and evaluated; off by default, same reason |
+| Cloud deployment | +2 | **Not done** — deliberate, see below |
+
+### One deliberate gap
+
+**No cloud deployment.** This runs on the operator's own OpenAI key, and a
+publicly reachable URL means paying for every stranger's questions. The
+containerization works and the deployment path is documented in
+[ARCHITECTURE.md](ARCHITECTURE.md); it is simply not switched on.
+
+---
+
+## Known limitations
+
+**The corpus has gaps.** Microsoft split the `azure-docs` repository — virtual
+machines, AKS, Key Vault, Cosmos DB, Monitor and Entra ID now live in separate
+repositories and are **not** indexed. `SOURCE_REPOS` in `app/config.py` is a list
+so they can be added.
+
+**Ingestion is not incremental.** Re-running it clears and reloads, which
+reassigns chunk ids and forces a full re-embed. Content-hash-based upsert would
+fix this.
+
+**First question is slow.** ~20 seconds while the embedding and reranking models
+load; ~5 seconds after that.
+
+**Answers are only as current as the clone.** Re-run with `--refresh-source` to
+pull newer documentation.
+
+---
 
 ## Acknowledgements
 
+Documentation content from [MicrosoftDocs/azure-docs](https://github.com/MicrosoftDocs/azure-docs), CC-BY-4.0.
 Built for the [DataTalks.Club LLM Zoomcamp](https://github.com/DataTalksClub/llm-zoomcamp).
-Documentation content is from [MicrosoftDocs/azure-docs](https://github.com/MicrosoftDocs/azure-docs),
-licensed CC-BY-4.0.

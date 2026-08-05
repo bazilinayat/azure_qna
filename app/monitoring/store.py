@@ -12,6 +12,7 @@ from app.config import (
     MONITORING_DATABASE_PATH,
     MONITORING_DATABASE_URL,
     MONITORING_ENABLED,
+    MONITORING_JOURNAL_MODE,
 )
 from app.monitoring.schema import conversations, feedback, metadata
 
@@ -30,10 +31,25 @@ def get_engine():
     def _pragmas(dbapi_connection, _record):
         cursor = dbapi_connection.cursor()
 
-        # WAL matters more here than for the index: Grafana reads this file
-        # while the app writes to it, and the default rollback journal would
-        # make readers and writers block each other.
-        cursor.execute("PRAGMA journal_mode = WAL")
+        # NOT WAL by default, despite WAL being the obvious choice for a file
+        # one process writes and another reads.
+        #
+        # WAL needs a shared-memory `-shm` file, which SQLite creates with mmap.
+        # mmap does not work on the filesystem Docker Desktop uses for Windows
+        # bind mounts, so a WAL-mode database is unreadable from the Grafana
+        # container: every query fails with "unable to open database file (14)".
+        #
+        # Worse, it fails intermittently. While the app container happens to
+        # hold the database open the -shm file already exists and reads succeed;
+        # once it is checkpointed away they start failing. That makes it look
+        # like a Grafana problem rather than a journal-mode one.
+        #
+        # DELETE journalling needs no shared memory and works on every host.
+        # The cost is that readers and writers briefly lock each other out,
+        # which at a few questions a minute against a dashboard polling every
+        # 30 seconds is not measurable. Set MONITORING_JOURNAL_MODE=WAL on a
+        # Linux host if you want the concurrency back.
+        cursor.execute(f"PRAGMA journal_mode = {MONITORING_JOURNAL_MODE}")
         cursor.execute("PRAGMA synchronous = NORMAL")
         cursor.execute("PRAGMA foreign_keys = ON")
         cursor.close()

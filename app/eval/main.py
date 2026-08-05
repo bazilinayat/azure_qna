@@ -19,8 +19,14 @@ import os
 from datetime import datetime
 
 
-def _write_results(rows: list[dict], name: str, results_dir) -> None:
-    """Persist a sweep as CSV so runs can be compared over time."""
+def _write_results(rows: list[dict], name: str, results_dir, quiet: bool = False):
+    """Persist results as CSV so runs can be compared over time.
+
+    Returns the path written, or None if there was nothing to write.
+    """
+
+    if not rows:
+        return None
 
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -32,7 +38,10 @@ def _write_results(rows: list[dict], name: str, results_dir) -> None:
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"\nSaved to {path}")
+    if not quiet:
+        print(f"\nSaved to {path}")
+
+    return path
 
 
 # --------------------------------------------------
@@ -77,9 +86,38 @@ def command_retrieval(args) -> int:
         random.seed(args.seed)
         items = random.sample(items, args.sample)
 
-    print(f"Evaluating retrieval over {len(items)} questions\n")
+    configs = retrieval.standard_configs()
 
-    results = retrieval.sweep(items)
+    if args.configs:
+        wanted = [name.strip() for name in args.configs.split(",") if name.strip()]
+
+        unknown = [name for name in wanted if name not in configs]
+
+        if unknown:
+            print(f"Unknown configuration(s): {', '.join(unknown)}")
+            print(f"Available: {', '.join(configs)}")
+            return 1
+
+        configs = {name: configs[name] for name in wanted}
+
+    print(f"Evaluating {len(configs)} configuration(s) over {len(items)} questions\n")
+
+    # A full sweep runs for tens of minutes and the reranking configurations are
+    # memory-hungry. Writing after every configuration means a crash near the end
+    # no longer discards everything that already succeeded.
+    def save_progress(partial):
+        _write_results(
+            [result.as_row() for result in partial],
+            "retrieval",
+            EVAL_RESULTS_DIR,
+            quiet=True,
+        )
+
+    results = retrieval.sweep(items, configs=configs, on_result=save_progress)
+
+    if not results:
+        print("No configuration completed successfully.")
+        return 1
 
     print("\n" + retrieval.format_table(results))
 
@@ -88,6 +126,11 @@ def command_retrieval(args) -> int:
         "retrieval",
         EVAL_RESULTS_DIR,
     )
+
+    if len(results) < len(configs):
+        failed = set(configs) - {result.name for result in results}
+        print(f"\nDid not complete: {', '.join(sorted(failed))}")
+        return 2
 
     return 0
 
@@ -188,6 +231,9 @@ def main() -> None:
     )
     retrieval_parser.add_argument("--sample", type=int, default=None,
                                   help="Use only N questions.")
+    retrieval_parser.add_argument("--configs",
+                                  help="Comma-separated configuration names, "
+                                       "to rerun a subset after a failure.")
     retrieval_parser.add_argument("--seed", type=int, default=42)
     retrieval_parser.set_defaults(handler=command_retrieval)
 

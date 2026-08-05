@@ -1,0 +1,21 @@
+# Loads any dashboard JSON in this directory on Grafana startup, so the panels
+# exist without anyone clicking through the UI. This is also what makes the
+# dashboard reproducible for someone who just cloned the repo.
+#
+# `allowUiUpdates: true` lets you edit panels in the browser and save; note that
+# a container restart re-applies the file and overwrites those edits, so export
+# the JSON back into this directory to keep a change.
+
+apiVersion: 1
+
+providers:
+  - name: AzureMentor
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

@@ -242,3 +242,7 @@ logs/
 
 # Local exploration scripts, not part of the deliverable
 scratch/
+
+.claude
+/eval_results
+/docs
