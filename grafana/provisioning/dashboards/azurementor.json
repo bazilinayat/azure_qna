@@ -13,7 +13,7 @@
   "editable": true,
   "refresh": "30s",
   "time": {
-    "from": "now-6h",
+    "from": "now-24h",
     "to": "now"
   },
   "panels": [
@@ -316,7 +316,7 @@
     },
     {
       "id": 7,
-      "title": "Cost per day",
+      "title": "Cost",
       "type": "timeseries",
       "datasource": {
         "type": "frser-sqlite-datasource",
@@ -335,8 +335,8 @@
             "type": "frser-sqlite-datasource",
             "uid": "azurementor-sqlite"
           },
-          "queryText": "SELECT $__unixEpochGroupSeconds(created_at_unix, 86400) AS time,\n       ROUND(SUM(COALESCE(cost_usd, 0)), 6) AS cost\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1\nORDER BY 1",
-          "rawQueryText": "SELECT $__unixEpochGroupSeconds(created_at_unix, 86400) AS time,\n       ROUND(SUM(COALESCE(cost_usd, 0)), 6) AS cost\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1\nORDER BY 1",
+          "queryText": "SELECT $__unixEpochGroupSeconds(created_at_unix, 3600) AS time,\n       ROUND(SUM(COALESCE(cost_usd, 0)), 6) AS cost\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1\nORDER BY 1",
+          "rawQueryText": "SELECT $__unixEpochGroupSeconds(created_at_unix, 3600) AS time,\n       ROUND(SUM(COALESCE(cost_usd, 0)), 6) AS cost\nFROM conversations\nWHERE created_at_unix BETWEEN $__from/1000 AND $__to/1000\nGROUP BY 1\nORDER BY 1",
           "queryType": "time series",
           "timeColumns": [
             "time"

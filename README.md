@@ -41,10 +41,18 @@ exactly the failure this project exists to prevent.
 
 ## What it looks like
 
-> **Screenshots to add:** save them as `assets/screenshot-chat.png` (a question
-> with citations and the sources panel expanded) and `assets/screenshot-grafana.png`
-> (the dashboard), then reference them here. Both are recommended by the project
-> guidelines. Note `docs/` is gitignored, so put them in `assets/`.
+![The AzureMentor chat interface](assets/screenshot-chat.png)
+
+The sidebar carries the answer-style selector (the prompt templates the
+evaluation compares), Word and PDF export, and a live readout of which model and
+index are serving you. The banner states plainly that the conversation is not
+saved — a promise the app keeps, since history lives only in session state.
+
+Answers cite their sources inline as `[1]`, `[2]`, and only the sources actually
+cited are listed underneath.
+
+<details>
+<summary>The same thing from the command line</summary>
 
 ```
 You > How do I stop a blob container from being publicly readable?
@@ -70,6 +78,8 @@ Sources cited (2 of 5 retrieved)
 
 retrieval 1.7s  generation 4.3s  |  2282 in + 324 out tokens
 ```
+
+</details>
 
 ---
 
@@ -343,10 +353,17 @@ docker compose up -d grafana
 
 <http://localhost:3000> — anonymous read-only, `admin`/`admin` to edit.
 
-A dashboard with **13 panels** is provisioned automatically — response time,
-token usage, cost, model usage, relevance distribution, user feedback, recent
-conversations, and where the judge and users disagree. Open
+A dashboard with **13 panels** is provisioned automatically. Open
 <http://localhost:3000/d/azurementor-monitoring>.
+
+![The Grafana monitoring dashboard](assets/screenshot-grafana.png)
+
+Response time split by stage, token usage, cost, questions per hour, model usage,
+the judge's relevance breakdown, user thumbs, and a recent-conversations table.
+The screenshot is real traffic: note the judge marking *"How do I create an AKS
+cluster with autoscaling?"* as `NON_RELEVANT` with **0** sources cited — AKS is
+one of the services Microsoft moved out of this repository, so the system
+correctly declines rather than inventing an answer.
 
 **[grafana/DASHBOARD.md](grafana/DASHBOARD.md)** explains every panel and how the
 course lesson's PostgreSQL translates to SQLite.
