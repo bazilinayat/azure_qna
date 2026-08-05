@@ -8,6 +8,13 @@ what the project is and how to run it.
 
 ## The system in one picture
 
+![AzureMentor architecture](assets/architecture.png)
+
+Regenerate with `uv run python assets/make_architecture.py` after editing
+`assets/make_architecture.py`.
+
+The same structure, as an editable diagram:
+
 ```mermaid
 flowchart TB
     subgraph BUILD["BUILD TIME — app/pipeline.py, run once, ~1 hour"]
